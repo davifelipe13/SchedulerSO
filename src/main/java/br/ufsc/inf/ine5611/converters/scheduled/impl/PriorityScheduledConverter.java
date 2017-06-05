@@ -80,17 +80,22 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          * - Adicione o objeto em alguma fila (é possível implementar com uma ou várias filas)
          * - Se a nova tarefa for mais prioritária que a atualmente executando, interrompa */
         //TODO implementar
-        ScheduledConverterTask task = new ScheduledConverterTask(inputStream, outputStream, mediaType, this.cancelCallback, inputBytes, priority, inputBytes);
-        this.queue.add(task);
-        
+        ScheduledConverterTask newTask = new ScheduledConverterTask(inputStream, outputStream, mediaType, this.cancelCallback, 
+                inputBytes, priority, inputBytes);
         if (this.current == null) {
-            current = task;
+            current = newTask;
         } else {
-            if (comparator.compare(current, task) == 1) {
-                
+            if (comparator.compare(current, newTask) <= 2) {
+                this.queue.add(newTask);
+            } if (comparator.compare(current, newTask) == 3 || comparator.compare(current, newTask) == 5 ) {
+                //newTask deve interromper current, adicionar current no queue e tomar o seu lugar
+            } if (comparator.compare(current, newTask) == 4) {
+                //regra de prioridade para duas tarefas normais (round-robin)
+            } if (comparator.compare(current, newTask) == 6) {
+                //regra de prioridade para duas tarefas lows (não sei)
             }
         }
-        return task;
+        return newTask;
     }
 
     @Override
@@ -104,6 +109,25 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          */
         //TODO implementar
         
+        long maxMs = TimeUnit.MILLISECONDS.convert(interval, timeUnit);
+        long taskMs = Math.min(current.getEpoch(), maxMs);
+        Stopwatch w = Stopwatch.createStarted();
+        
+        /*try {
+            while (current != null && current.getEpoch() > 0
+                    && w.elapsed(TimeUnit.MILLISECONDS) < maxMs) {
+                Stopwatch w2 = Stopwatch.createStarted();
+                wait(taskMs);
+                taskData.processingLeft -= w2.elapsed(TimeUnit.MILLISECONDS);
+            }
+            if (taskData.processingLeft <= 0) {
+                completionListeners.forEach(l -> l.accept(task));
+                activeTasks.remove(task);
+                current = null;
+            }
+        } finally {
+            current = null;
+        } */
     }
 
     @Override
@@ -123,15 +147,36 @@ public class PriorityScheduledConverter implements ScheduledConverter {
         
         return true;
     }
+    
+    public synchronized boolean interrupt() {
+        if (current == null) return false;
+        //interruptListeners.forEach(l -> l.accept(current.task));
+        //fila de processos interrompidos??
+        current = null;
+        notifyAll();
+        return true;
+    }
    
     
     public class MyComparator implements Comparator<ScheduledConverterTask> {
 
     @Override
-    public int compare(ScheduledConverterTask task1, ScheduledConverterTask task2) {
-        if (task1.getPriority() == Priority.HIGH && task2.getPriority() == Priority.HIGH) {
-            return 1; //taskAtual precisar terminar sua execução
-        } 
+    public int compare(ScheduledConverterTask current, ScheduledConverterTask newTask) {
+        if (current.getPriority() == Priority.HIGH && (newTask.getPriority() == Priority.HIGH || 
+                newTask.getPriority() == Priority.NORMAL || newTask.getPriority() == Priority.LOW)) {
+            return 1; //current precisar terminar sua execução antes da newTask, logo, adicionar newTask no queue 
+            // verificar se HIGH para HIGH se aplica na regra do retorno.
+        } else if (current.getPriority() == Priority.NORMAL && newTask.getPriority() == Priority.LOW) {
+            return 2; //current precisar terminar sua execução antes da newTask, logo, adicionar newTask no queue
+        } else if ((current.getPriority() == Priority.NORMAL || current.getPriority() == Priority.LOW) && newTask.getPriority() == Priority.HIGH) {
+            return 3; //newTask deve interromper current, adicionar current no queue e tomar o seu lugar
+        } else if (current.getPriority() == Priority.NORMAL && newTask.getPriority() == Priority.NORMAL) {
+            return 4; //fazer o round-robin das tarefas normais
+        } else if (current.getPriority() == Priority.LOW && newTask.getPriority() == Priority.NORMAL) {
+            return 5; //newTask deve interromper current, adicionar current no queue e tomar o seu lugar
+        } else if (current.getPriority() == Priority.LOW && newTask.getPriority() == Priority.LOW) {
+            return 6; //entender regra de prioridade das tarefas LOW
+        }
         return 0;
     }
     
