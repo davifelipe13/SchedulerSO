@@ -41,7 +41,7 @@ public class PriorityScheduledConverter implements ScheduledConverter {
         this.converter.addCompletionListener(new Consumer<ConverterTask>() {
             @Override
             public void accept(ConverterTask t) {
-                throw new UnsupportedOperationException("Not supported yet."); //To change body of generated methods, choose Tools | Templates.
+                
             }
         });
         this.comparator = new MyComparator();
@@ -80,8 +80,9 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          * - Adicione o objeto em alguma fila (é possível implementar com uma ou várias filas)
          * - Se a nova tarefa for mais prioritária que a atualmente executando, interrompa */
         //TODO implementar
+        long epoch = 0; //????????? mudar
         ScheduledConverterTask newTask = new ScheduledConverterTask(inputStream, outputStream, mediaType, this.cancelCallback, 
-                inputBytes, priority, inputBytes);
+                inputBytes, priority, epoch);
         if (this.current == null) {
             current = newTask;
         } else {
@@ -110,7 +111,7 @@ public class PriorityScheduledConverter implements ScheduledConverter {
         //TODO implementar
         
         long maxMs = TimeUnit.MILLISECONDS.convert(interval, timeUnit);
-        long taskMs = Math.min(current.getEpoch(), maxMs);
+        long taskMs = Math.min(current.getCycles(), maxMs);
         Stopwatch w = Stopwatch.createStarted();
         
         /*try {
