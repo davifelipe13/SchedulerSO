@@ -26,13 +26,13 @@ public class PriorityScheduledConverter implements ScheduledConverter {
     
     private Converter converter;
     private HashMap<Priority, Integer> quantas;
-    private Consumer<ConverterTask> cancelCallback;
-    private PriorityQueue<ScheduledConverterTask> queue;
+    private PriorityBlockingQueue<ScheduledConverterTask> queue;
     private Collection<ConverterTask> allTasks;
     private ScheduledConverterTask current = null;
     
     private MyComparator comparator;
-    
+    private long epoch;
+
 
     public PriorityScheduledConverter(Converter converter) {
         //TODO implementar
@@ -40,14 +40,21 @@ public class PriorityScheduledConverter implements ScheduledConverter {
            - Registre um listener em converter.addCompletionListener() para que você saiba
          *   quando uma tarefa terminou */
         this.converter = converter;
-        this.converter.addCompletionListener(this::cancel);
+        this.converter.addCompletionListener(this::completarTarefa);
         this.comparator = new MyComparator();
-        this.queue = new PriorityQueue<>(comparator);
+        this.queue = new PriorityBlockingQueue<>(1024, comparator);
         this.quantas = new HashMap<>();
+        this.allTasks = new ArrayList<ConverterTask>();
         this.quantas.put(Priority.LOW, DEFAULT_QUANTUM_LOW);
         this.quantas.put(Priority.NORMAL, DEFAULT_QUANTUM_NORMAL);
         this.quantas.put(Priority.HIGH, DEFAULT_QUANTUM_HIGH);
             
+    }
+
+    private void completarTarefa(ConverterTask task) {
+        ScheduledConverterTask sct = (ScheduledConverterTask) task;
+        sct.complete(null);
+        queue.remove(sct);
     }
 
     @Override
@@ -69,8 +76,12 @@ public class PriorityScheduledConverter implements ScheduledConverter {
 
     @Override
     public Collection<ConverterTask> getAllTasks() {
-        /* Junte todas as tarefas não completas em um Collection */
+        /* Junte todas as tarefas não completas em um Collecti  on */
         //TODO implementar
+        
+        for (ConverterTask task: queue) {
+            this.allTasks.add(task);
+        }
         return this.allTasks;
     }
 
@@ -81,11 +92,10 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          * - Adicione o objeto em alguma fila (é possível implementar com uma ou várias filas)
          * - Se a nova tarefa for mais prioritária que a atualmente executando, interrompa */
         //TODO implementar
-        long epoch = 0; //????????? mudar
-        ScheduledConverterTask newTask = new ScheduledConverterTask(inputStream, outputStream, mediaType, this.cancelCallback, 
-                inputBytes, priority, epoch);
+        ScheduledConverterTask newTask = new ScheduledConverterTask(inputStream, outputStream, mediaType, this::cancel,
+                inputBytes, priority, epoch++);
         queue.add(newTask);
-        if(current != null && comparator.compare(current, newTask) == 1) {
+        if(current != null) {
             if (priority.compareTo(current.getPriority()) == 1)
                 interrupt();
         } 
@@ -104,33 +114,21 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          * }
          */
         //TODO implementar
-        
-        /* if (comparator.compare(current, newTask) <= 2) {
-                this.queue.add(newTask);
-            } if (comparator.compare(current, newTask) == 3 || comparator.compare(current, newTask) == 5 ) {
-                //newTask deve interromper current, adicionar current no queue e tomar o seu lugar
-            } if (comparator.compare(current, newTask) == 4) {
-                //regra de prioridade para duas tarefas normais (round-robin)
-            } if (comparator.compare(current, newTask) == 6) {
-                //regra de prioridade para duas tarefas lows (não sei)
-            }
-        */
-        
+
         long maxMs = TimeUnit.MILLISECONDS.convert(interval, timeUnit);
-        long taskMs = Math.min(current.getCycles(), maxMs);
         Stopwatch w = Stopwatch.createStarted();
-         while (current != null && current.getEpoch() > 0
-                    && w.elapsed(TimeUnit.MILLISECONDS) < maxMs) {
-             ScheduledConverterTask task = queue.poll();
+         while (w.elapsed(TimeUnit.MILLISECONDS) < maxMs) {
+             ScheduledConverterTask task = queue.take();
+             current = task;
              task.incCycles();
+             queue.add(task);
             try {
                 this.converter.processFor(task, getQuantum(task.getPriority()), MILLISECONDS);
             } catch (IOException ex) {
-                
+                task.completeExceptionally(ex);
+                queue.remove(task);
             }
          }
-        
-        
     }
 
     @Override
@@ -139,15 +137,13 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          * - Cancele as tarefas não concluídas
          */
         //TODO implementar
-        boolean interrupt = interrupt();
         Collection<ConverterTask> tasks = getAllTasks();
-        //tasks.forEach(cancelCallback);
-        if(interrupt)
+        if(interrupt())
         for (ConverterTask task : tasks) {
-            if (!task.isDone() && task.isCancelled())
+            if (!task.isDone() && !task.isCancelled())
                 cancel(task);
           //  inputStream.close();
-           // outputStream.close();
+          //  outputStream.close();
         }
     }
     
@@ -159,10 +155,8 @@ public class PriorityScheduledConverter implements ScheduledConverter {
     
     public synchronized boolean interrupt() {
         if (current == null) return false;
-        //interruptListeners.forEach(l -> l.accept(current.task));
-        //fila de processos interrompidos??
         current = null;
-        notifyAll();
+        this.converter.interrupt();
         return true;
     }
    
@@ -171,23 +165,21 @@ public class PriorityScheduledConverter implements ScheduledConverter {
 
     @Override
     public int compare(ScheduledConverterTask current, ScheduledConverterTask newTask) {
-        
-        if (current.getPriority() == Priority.HIGH && (newTask.getPriority() == Priority.HIGH || 
-                newTask.getPriority() == Priority.NORMAL || newTask.getPriority() == Priority.LOW)) {
-            return 1; //current precisar terminar sua execução antes da newTask, logo, adicionar newTask no queue 
-            // verificar se HIGH para HIGH se aplica na regra do retorno.
-        } else if (current.getPriority() == Priority.NORMAL && newTask.getPriority() == Priority.LOW) {
-            return 2; //current precisar terminar sua execução antes da newTask, logo, adicionar newTask no queue
-        } else if ((current.getPriority() == Priority.NORMAL || current.getPriority() == Priority.LOW) && newTask.getPriority() == Priority.HIGH) {
-            return 3; //newTask deve interromper current, adicionar current no queue e tomar o seu lugar
-        } else if (current.getPriority() == Priority.NORMAL && newTask.getPriority() == Priority.NORMAL) {
-            return 4; //fazer o round-robin das tarefas normais
-        } else if (current.getPriority() == Priority.LOW && newTask.getPriority() == Priority.NORMAL) {
-            return 5; //newTask deve interromper current, adicionar current no queue e tomar o seu lugar
-        } else if (current.getPriority() == Priority.LOW && newTask.getPriority() == Priority.LOW) {
-            return 6; //entender regra de prioridade das tarefas LOW
+        int cmp = -1 * current.getPriority().compareTo(newTask.getPriority());
+        if (cmp != 0)  return cmp;
+        if (current.getPriority() == Priority.LOW) {
+            cmp = Long.compare(current.getInputBytes(), newTask.getInputBytes());
+            if (cmp == 0) {
+                cmp = Long.compare(current.getCycles(), newTask.getCycles());
+            } else {
+                return cmp;
+            }
+        } else if (current.getPriority() == Priority.NORMAL) {
+            //REGRA 3
+        } else {
+            cmp = Long.compare(current.getEpoch(), newTask.getEpoch());
+            return cmp;
         }
-        
         return 0; 
     }
     
