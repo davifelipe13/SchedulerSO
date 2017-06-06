@@ -16,6 +16,8 @@ import java.util.concurrent.*;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import java.util.function.Consumer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class PriorityScheduledConverter implements ScheduledConverter {
     public static final int DEFAULT_QUANTUM_LOW = 50;
@@ -26,7 +28,7 @@ public class PriorityScheduledConverter implements ScheduledConverter {
     private HashMap<Priority, Integer> quantas;
     private Consumer<ConverterTask> cancelCallback;
     private PriorityQueue<ScheduledConverterTask> queue;
-    private List<ConverterTask> allTasks;
+    private Collection<ConverterTask> allTasks;
     private ScheduledConverterTask current = null;
     
     private MyComparator comparator;
@@ -38,14 +40,13 @@ public class PriorityScheduledConverter implements ScheduledConverter {
            - Registre um listener em converter.addCompletionListener() para que você saiba
          *   quando uma tarefa terminou */
         this.converter = converter;
-        this.converter.addCompletionListener(new Consumer<ConverterTask>() {
-            @Override
-            public void accept(ConverterTask t) {
-                
-            }
-        });
+        this.converter.addCompletionListener(this::cancel);
         this.comparator = new MyComparator();
-        this.queue = new PriorityQueue<>(comparator); 
+        this.queue = new PriorityQueue<>(comparator);
+        this.quantas = new HashMap<>();
+        this.quantas.put(Priority.LOW, DEFAULT_QUANTUM_LOW);
+        this.quantas.put(Priority.NORMAL, DEFAULT_QUANTUM_NORMAL);
+        this.quantas.put(Priority.HIGH, DEFAULT_QUANTUM_HIGH);
             
     }
 
@@ -54,8 +55,8 @@ public class PriorityScheduledConverter implements ScheduledConverter {
         /* Dica: use um HasMap<Priority, Integer> para manter os quanta configurados para
          * cada prioridade */
         //TODO implementar
-        quantas.put(priority, milliseconds);
-        
+        Integer quantum = milliseconds;
+        quantas.put(priority, quantum);
         
     }
 
@@ -83,20 +84,14 @@ public class PriorityScheduledConverter implements ScheduledConverter {
         long epoch = 0; //????????? mudar
         ScheduledConverterTask newTask = new ScheduledConverterTask(inputStream, outputStream, mediaType, this.cancelCallback, 
                 inputBytes, priority, epoch);
-        if (this.current == null) {
-            current = newTask;
-        } else {
-            if (comparator.compare(current, newTask) <= 2) {
-                this.queue.add(newTask);
-            } if (comparator.compare(current, newTask) == 3 || comparator.compare(current, newTask) == 5 ) {
-                //newTask deve interromper current, adicionar current no queue e tomar o seu lugar
-            } if (comparator.compare(current, newTask) == 4) {
-                //regra de prioridade para duas tarefas normais (round-robin)
-            } if (comparator.compare(current, newTask) == 6) {
-                //regra de prioridade para duas tarefas lows (não sei)
-            }
-        }
+        queue.add(newTask);
+        if(current != null && comparator.compare(current, newTask) == 1) {
+            if (priority.compareTo(current.getPriority()) == 1)
+                interrupt();
+        } 
+        
         return newTask;
+        
     }
 
     @Override
@@ -110,25 +105,32 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          */
         //TODO implementar
         
+        /* if (comparator.compare(current, newTask) <= 2) {
+                this.queue.add(newTask);
+            } if (comparator.compare(current, newTask) == 3 || comparator.compare(current, newTask) == 5 ) {
+                //newTask deve interromper current, adicionar current no queue e tomar o seu lugar
+            } if (comparator.compare(current, newTask) == 4) {
+                //regra de prioridade para duas tarefas normais (round-robin)
+            } if (comparator.compare(current, newTask) == 6) {
+                //regra de prioridade para duas tarefas lows (não sei)
+            }
+        */
+        
         long maxMs = TimeUnit.MILLISECONDS.convert(interval, timeUnit);
         long taskMs = Math.min(current.getCycles(), maxMs);
         Stopwatch w = Stopwatch.createStarted();
-        
-        /*try {
-            while (current != null && current.getEpoch() > 0
+         while (current != null && current.getEpoch() > 0
                     && w.elapsed(TimeUnit.MILLISECONDS) < maxMs) {
-                Stopwatch w2 = Stopwatch.createStarted();
-                wait(taskMs);
-                taskData.processingLeft -= w2.elapsed(TimeUnit.MILLISECONDS);
+             ScheduledConverterTask task = queue.poll();
+             task.incCycles();
+            try {
+                this.converter.processFor(task, getQuantum(task.getPriority()), MILLISECONDS);
+            } catch (IOException ex) {
+                
             }
-            if (taskData.processingLeft <= 0) {
-                completionListeners.forEach(l -> l.accept(task));
-                activeTasks.remove(task);
-                current = null;
-            }
-        } finally {
-            current = null;
-        } */
+         }
+        
+        
     }
 
     @Override
@@ -137,16 +139,22 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          * - Cancele as tarefas não concluídas
          */
         //TODO implementar
-        try {
-            
-        } catch (Exception e) {
-            
+        boolean interrupt = interrupt();
+        Collection<ConverterTask> tasks = getAllTasks();
+        //tasks.forEach(cancelCallback);
+        if(interrupt)
+        for (ConverterTask task : tasks) {
+            if (!task.isDone() && task.isCancelled())
+                cancel(task);
+          //  inputStream.close();
+           // outputStream.close();
         }
     }
     
-    public boolean cancel() {
-        
-        return true;
+    public boolean cancel(ConverterTask task) {
+        if (task == current) converter.interrupt();
+        converter.cancel(task); //marca como cancelado
+        return queue.remove(task);
     }
     
     public synchronized boolean interrupt() {
@@ -163,6 +171,7 @@ public class PriorityScheduledConverter implements ScheduledConverter {
 
     @Override
     public int compare(ScheduledConverterTask current, ScheduledConverterTask newTask) {
+        
         if (current.getPriority() == Priority.HIGH && (newTask.getPriority() == Priority.HIGH || 
                 newTask.getPriority() == Priority.NORMAL || newTask.getPriority() == Priority.LOW)) {
             return 1; //current precisar terminar sua execução antes da newTask, logo, adicionar newTask no queue 
@@ -178,7 +187,8 @@ public class PriorityScheduledConverter implements ScheduledConverter {
         } else if (current.getPriority() == Priority.LOW && newTask.getPriority() == Priority.LOW) {
             return 6; //entender regra de prioridade das tarefas LOW
         }
-        return 0;
+        
+        return 0; 
     }
     
 }
