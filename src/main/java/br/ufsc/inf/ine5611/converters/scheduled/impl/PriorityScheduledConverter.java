@@ -80,7 +80,7 @@ public class PriorityScheduledConverter implements ScheduledConverter {
         //TODO implementar
         
         for (ConverterTask task: queue) {
-            this.allTasks.add(task);
+                this.allTasks.add(task);
         }
         return this.allTasks;
     }
@@ -140,7 +140,7 @@ public class PriorityScheduledConverter implements ScheduledConverter {
         Collection<ConverterTask> tasks = getAllTasks();
         if(interrupt())
         for (ConverterTask task : tasks) {
-            if (!task.isDone() && !task.isCancelled())
+            if (!task.isDone() && task.isCancelled())
                 cancel(task);
           //  inputStream.close();
           //  outputStream.close();
