@@ -113,8 +113,8 @@ public class PriorityScheduledConverter implements ScheduledConverter {
          *   this.converter.processFor(getQuantum(t.getPriority(), MILLISECONDS);
          * }
          */
-        //TODO implementar
-
+        //TODO implementarasdasd
+        int a = 0;
         long maxMs = TimeUnit.MILLISECONDS.convert(interval, timeUnit);
         Stopwatch w = Stopwatch.createStarted();
          while (w.elapsed(TimeUnit.MILLISECONDS) < maxMs) {
