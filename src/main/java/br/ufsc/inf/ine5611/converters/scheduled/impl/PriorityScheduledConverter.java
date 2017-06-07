@@ -78,7 +78,6 @@ public class PriorityScheduledConverter implements ScheduledConverter {
     public Collection<ConverterTask> getAllTasks() {
         /* Junte todas as tarefas não completas em um Collecti  on */
         //TODO implementar
-        
         for (ConverterTask task: queue) {
                 this.allTasks.add(task);
         }
@@ -99,7 +98,6 @@ public class PriorityScheduledConverter implements ScheduledConverter {
             if (priority.compareTo(current.getPriority()) == 1)
                 interrupt();
         } 
-        
         return newTask;
         
     }
@@ -123,7 +121,8 @@ public class PriorityScheduledConverter implements ScheduledConverter {
              task.incCycles();
              queue.add(task);
             try {
-                this.converter.processFor(task, getQuantum(task.getPriority()), MILLISECONDS);
+                if (!task.isDone())
+                    this.converter.processFor(task, getQuantum(task.getPriority()), MILLISECONDS);
             } catch (IOException ex) {
                 task.completeExceptionally(ex);
                 queue.remove(task);
@@ -132,18 +131,14 @@ public class PriorityScheduledConverter implements ScheduledConverter {
     }
 
     @Override
-    public synchronized void close() throws Exception {
+      public synchronized void close() throws Exception {
         /* - Libere quaisquer recursos alocados
          * - Cancele as tarefas não concluídas
          */
         //TODO implementar
-        Collection<ConverterTask> tasks = getAllTasks();
-        if(interrupt())
-        for (ConverterTask task : tasks) {
-            if (!task.isDone() && task.isCancelled())
-                cancel(task);
-          //  inputStream.close();
-          //  outputStream.close();
+        for(ScheduledConverterTask task : queue){
+            task.close();
+            cancel(task);
         }
     }
     
@@ -164,21 +159,30 @@ public class PriorityScheduledConverter implements ScheduledConverter {
     public class MyComparator implements Comparator<ScheduledConverterTask> {
 
     @Override
-    public int compare(ScheduledConverterTask current, ScheduledConverterTask newTask) {
-        int cmp = -1 * current.getPriority().compareTo(newTask.getPriority());
-        if (cmp != 0)  return cmp;
-        if (current.getPriority() == Priority.LOW) {
-            cmp = Long.compare(current.getInputBytes(), newTask.getInputBytes());
+    public int compare(ScheduledConverterTask l, ScheduledConverterTask r) {
+        int cmp = -1 * l.getPriority().compareTo(r.getPriority());
+        if (cmp != 0)  return cmp; //ALGORITMO PRIORIDADE
+        if (l.getPriority() == Priority.LOW) {
+            //ALGORITMO SJF
+            cmp = Long.compare(l.getInputBytes(), r.getInputBytes());
             if (cmp == 0) {
-                cmp = Long.compare(current.getCycles(), newTask.getCycles());
+                cmp = Long.compare(l.getCycles(), r.getCycles());
             } else {
                 return cmp;
             }
-        } else if (current.getPriority() == Priority.NORMAL) {
-            //REGRA 3
-        } else {
-            cmp = Long.compare(current.getEpoch(), newTask.getEpoch());
+        } else if (l.getPriority() == Priority.NORMAL) {
+            //ALGORITMO ROUND ROBIN
+            cmp = Long.compare(l.getCycles(), r.getCycles());
+            if(cmp == 0){
+                return Long.compare(l.getEpoch(), r.getEpoch());
+            }
             return cmp;
+                
+        } else {
+            //ALGORITMO FIFO
+            cmp = Long.compare(l.getEpoch(), r.getEpoch());
+            return cmp;
+            
         }
         return 0; 
     }
