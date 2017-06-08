@@ -4,9 +4,7 @@ import br.ufsc.inf.ine5611.converters.Converter;
 import br.ufsc.inf.ine5611.converters.scheduled.ConverterTask;
 import br.ufsc.inf.ine5611.converters.scheduled.Priority;
 import br.ufsc.inf.ine5611.converters.scheduled.ScheduledConverter;
-import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
-import java.util.PriorityQueue;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,9 +13,6 @@ import java.util.*;
 import java.util.concurrent.*;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import java.util.function.Consumer;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 public class PriorityScheduledConverter implements ScheduledConverter {
     public static final int DEFAULT_QUANTUM_LOW = 50;
@@ -143,8 +138,9 @@ public class PriorityScheduledConverter implements ScheduledConverter {
     }
     
     public boolean cancel(ConverterTask task) {
-        if (task == current) converter.interrupt();
         converter.cancel(task); //marca como cancelado
+        if (task == current) converter.interrupt();
+        
         return queue.remove(task);
     }
     
@@ -160,8 +156,8 @@ public class PriorityScheduledConverter implements ScheduledConverter {
 
     @Override
     public int compare(ScheduledConverterTask l, ScheduledConverterTask r) {
-        int cmp = -1 * l.getPriority().compareTo(r.getPriority());
-        if (cmp != 0)  return cmp; //ALGORITMO PRIORIDADE
+        int cmp = -1 * l.getPriority().compareTo(r.getPriority());//ALGORITMO PRIORIDADE
+        if (cmp != 0)  return cmp; 
         if (l.getPriority() == Priority.LOW) {
             //ALGORITMO SJF
             cmp = Long.compare(l.getInputBytes(), r.getInputBytes());
